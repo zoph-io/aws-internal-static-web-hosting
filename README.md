@@ -1,4 +1,4 @@
-# AWS Internal Static Web Hosting
+# 🏰 AWS Internal Static Web Hosting
 
 ## :brain: Rationale
 
@@ -26,7 +26,7 @@ Then, run the following command:
 
 ## 🖌️ Static Website
 
-You will have to deploy your static website into the created S3 bucket that is named with your domain name variable. Done.
+You will have to deploy your static website into the created S3 bucket that is named with your `DomainName` variable. Done ✅.
 
 ## ✋ CleanUp
 
@@ -34,9 +34,9 @@ You will have to deploy your static website into the created S3 bucket that is n
 
 ## :man_technologist: Credits
 
-- :pirate_flag: AWS Security Boutique: [zoph.io](https://zoph.io?utm_source=aiswh)
+- 🏴‍☠️ AWS Security Boutique: [zoph.io](https://zoph.io?utm_source=aiswh)
 - 💌 [AWS Security Digest Newsletter](https://awssecuritydigest.com?utm_source=aiswh)
-- :bird: 𝕏/Twitter: [zoph](https://twitter.com/zoph)
+- 🐦 𝕏/Twitter: [zoph](https://twitter.com/zoph)
 
 ## 🤔 Inspiration
 
