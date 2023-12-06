@@ -4,7 +4,7 @@
 
 When considering hosting a static website on AWS, the go-to solution often involves combining CloudFront with S3. However, if your project entails stringent privacy requirements and is intended solely for internal users, configuring CloudFront with these constraints can be both complex and challenging.
 
-This blueprint provides a detailed example of hosting a static website internally on AWS, utilizing an Application Load Balancer (ALB), an S3 VPC Endpoint Interface, and a Private S3 Bucket. This setup ensures enhanced privacy and internal access control.
+This blueprint provides a detailed example of hosting a static website internally on AWS, utilizing an **Internal** Application Load Balancer (ALB), an S3 VPC Endpoint Interface, and a Private S3 Bucket. This setup ensures enhanced privacy and internal access control.
 
 You are encouraged to tailor this blueprint to fit your specific requirements.
 
@@ -15,6 +15,10 @@ Additionally, contributions through pull requests for further improvements are a
 1. Route53 Hosted Domain
 2. ACM Certificate
 3. VPC with Private Subnets
+
+## 📐 Architecture
+
+![Architecture Diagram](assets/architecture.png)
 
 ## :keyboard: Usage
 
