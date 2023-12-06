@@ -1,0 +1,253 @@
+AWSTemplateFormatVersion:
+  "2010-09-09"
+  # Provided by zoph.io with <3
+  # This template creates the following AWS resources:
+  #   - VPC Endpoint Interface for S3 + SecurityGroup
+  #   - S3 Bucket
+  #   - S3 Bucket Policy
+  #   - Internal ALB + SecurityGroup
+  #     - ALB Listener + Rule
+  #     - ALB Target Group
+  #     - Route53 Record
+  #   - Lambda Function
+  #     - Lambda Role
+  #     - Lambda Policy
+  #     - Custom Resource to get private IP addresses of VPC Endpoint Interface (S3)
+Description: |
+  Template for hosting an internal HTTPS static website with ALB, S3 Bucket, and PrivateLink S3 Endpoint Interface.
+  Provided by zoph.io with <3
+
+Parameters:
+  pProject:
+    Description: Project Name
+    Type: "String"
+  pVpcId:
+    Description: VPC Id
+    Type: "String"
+  pVpcCidrBlock:
+    Description: VPC CIDR Block
+    Type: "String"
+  pPrivateSubnetId1:
+    Description: Private Subnet 1
+    Type: "String"
+  pPrivateSubnetId2:
+    Description: Private Subnet 2
+    Type: "String"
+  pACMCertificateArn:
+    Description: ACM Certificate Arn
+    Type: "String"
+  pDomainName:
+    Description: Target Domain Name
+    Type: "String"
+  pHostedZoneId:
+    Description: Hosted Zone Id
+    Type: "String"
+
+Resources:
+  S3VpcEndpoint:
+    Type: "AWS::EC2::VPCEndpoint"
+    Properties:
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.s3"
+      VpcId: !Ref pVpcId
+      VpcEndpointType: Interface
+      SubnetIds:
+        - !Ref pPrivateSubnetId1
+        - !Ref pPrivateSubnetId2
+      SecurityGroupIds:
+        - !Ref EndpointSecurityGroup
+
+  S3Bucket:
+    Type: "AWS::S3::Bucket"
+    Properties:
+      BucketName: !Ref pDomainName
+      Tags:
+        - Key: Name
+          Value: !Sub "${pProject} S3 Bucket"
+
+  S3BucketPolicy:
+    Type: "AWS::S3::BucketPolicy"
+    Properties:
+      Bucket: !Ref S3Bucket
+      PolicyDocument:
+        Statement:
+          - Action: "s3:GetObject"
+            Effect: Allow
+            Resource: !Sub "arn:${AWS::Partition}:s3:::${S3Bucket}/*"
+            Principal: "*"
+            Condition:
+              StringEquals:
+                aws:SourceVpce: !Ref S3VpcEndpoint
+
+  AlBSecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupDescription: !Sub "${pProject} ALB Security Group"
+      VpcId: !Ref pVpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: !Ref pVpcCidrBlock
+
+  EndpointSecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupDescription: !Sub "${pProject} S3 Endpoint Interface Security Group"
+      VpcId: !Ref pVpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !Ref AlBSecurityGroup
+
+  InternalALB:
+    Type: "AWS::ElasticLoadBalancingV2::LoadBalancer"
+    Properties:
+      Name: !Sub "${pProject}-Internal-ALB"
+      Scheme: internal
+      Subnets:
+        - !Ref pPrivateSubnetId1
+        - !Ref pPrivateSubnetId2
+      SecurityGroups:
+        - !Ref AlBSecurityGroup
+      Type: application
+      Tags:
+        - Key: Name
+          Value: !Sub "${pProject} Internal ALB"
+
+  AlBListener:
+    Type: "AWS::ElasticLoadBalancingV2::Listener"
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+      LoadBalancerArn: !Ref InternalALB
+      SslPolicy: ELBSecurityPolicy-TLS13-1-2-2021-06
+      Port: 443
+      Protocol: HTTPS
+      Certificates:
+        - CertificateArn: !Ref pACMCertificateArn
+
+  AdditionalListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: redirect
+          RedirectConfig:
+            Protocol: HTTPS
+            Port: "#{port}"
+            Host: "#{host}"
+            Path: "/#{path}index.html"
+            Query: "#{query}"
+            StatusCode: HTTP_301
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - "*/"
+      ListenerArn: !Ref AlBListener
+      Priority: 1
+
+  TargetGroup:
+    Type: "AWS::ElasticLoadBalancingV2::TargetGroup"
+    Properties:
+      VpcId: !Ref pVpcId
+      Protocol: HTTP
+      Matcher:
+        HttpCode: 307,405
+      Port: 80
+      TargetType: ip
+      Targets:
+        - Id: !GetAtt GetPrivateIPs.IP0
+        - Id: !GetAtt GetPrivateIPs.IP1
+
+  Route53Record:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref pHostedZoneId
+      Name: !Ref pDomainName
+      Type: A
+      AliasTarget:
+        HostedZoneId: !GetAtt InternalALB.CanonicalHostedZoneID
+        DNSName: !GetAtt InternalALB.DNSName
+
+  ## This is only because VPC Endpoint does not provide Private IP Address attribute in CloudFormation :( ##
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+  LambdaPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: LambdaPolicy
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - ec2:DescribeNetworkInterface*
+            Resource: "*"
+      Roles:
+        - !Ref LambdaRole
+  LambdaFunction:
+    Type: "AWS::Lambda::Function"
+    DeletionPolicy: "Delete"
+    Properties:
+      Code:
+        ZipFile: |
+          import cfnresponse
+          import json
+          import boto3
+          def lambda_handler(event, context):
+              print('REQUEST RECEIVED:\n' + json.dumps(event))
+              responseData = {}
+              if event['RequestType'] == 'Delete':
+                cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                return
+              if event['RequestType'] == 'Create':
+                try:
+                  ec2 = boto3.resource('ec2')
+                  enis = event['ResourceProperties']['NetworkInterfaceIds']
+                  for index, eni in enumerate(enis):
+                    network_interface = ec2.NetworkInterface(eni)
+                    responseData['IP' + str(index)] = network_interface.private_ip_address
+                    print(responseData)
+                except Exception as e:
+                  responseData = {'error': str(e)}
+                  cfnresponse.send(event, context, cfnresponse.FAILED, responseData)
+                  return
+                cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData)
+      Handler: index.lambda_handler
+      Description: !Sub "${pProject} Get Private IP Addresses of VPC Endpoint Interface (S3)"
+      Role: !GetAtt LambdaRole.Arn
+      Runtime: python3.10
+      Timeout: 20
+
+  # # ---------------------------------------------------------------------------#
+  # # Custom Resource to get private IP addresses of VPC Endpoint Interface (S3) #
+  # # ---------------------------------------------------------------------------#
+  GetPrivateIPs:
+    Type: Custom::GetPrivateIPs
+    Properties:
+      ServiceToken: !GetAtt LambdaFunction.Arn
+      NetworkInterfaceIds: !GetAtt S3VpcEndpoint.NetworkInterfaceIds
+
+Outputs:
+  S3VpcEndpointId:
+    Description: "VPC Endpoint Id"
+    Value: !Ref S3VpcEndpoint
+  InternalALBArn:
+    Description: "Internal ALB Arn"
+    Value: !Ref InternalALB
+  DomainName:
+    Description: "Domain Name (Internal Static Website)"
+    Value: !Ref pDomainName
